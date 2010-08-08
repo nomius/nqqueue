@@ -1,0 +1,30 @@
+CONFIGURATION FILES:
+
+/var/qmail/control/{general.cfb,nqqueue.cfb,domain.cfb,env(NQQFILE).cfb}
+
+
+Using general plugins:
+
+general.cfb +----> If From is local  ----> get user@domain
+            |                        `---> If not user@domain, then get domain
+            |                        `---> Otherwise get fallback line
+            |
+            `----> If From is remote ----> get :
+
+
+Using per user plugins (this is only done for those local Rcpt's):
+
+file will be used this way:
+	if environment NQQFILE is set
+		file = env
+	else if domain
+		file = domain
+	else if nqqueue
+		file = nqqueue
+	else
+		no file
+
+$file.cfb ----> get user@domain
+          `---> If not user@domain, then get get domain
+          `---> Otherwise get fallback line
+
