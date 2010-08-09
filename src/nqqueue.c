@@ -198,7 +198,6 @@ void *RunPerUserScannersAndDelivery(void *Data)
 		delivery(me->To, File, PerUserRunnedScanners, PerUserScanners);
 
 	/* End the thread in the right way */
-	pthread_detach(me->Index);
 	me->Index = (pthread_t)-1;
 	pthread_exit(NULL);
 }
