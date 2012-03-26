@@ -34,22 +34,22 @@
 #define STARTSWITH(x,y) (!strncmp(x, y, ((strlen(x))>(strlen(y))? (strlen(y)):(strlen(x)))))
 
 /* Structures needed for plugin's configuration */
-struct plugin {
+typedef struct stNPlugin {
 	/* Function that returns an allocated char pointer with the plugin name */
 	char *(*plugin_name) (void);
 	/* Function that returns an allocated char pointer with the plugin version */
 	char *(*plugin_version) (void);
 	/* Initial function. Arguments: params, mail, From, Rcpt, general, PerUser */
-	struct ModReturn *(*plugin_init) (char *, const char *, const char *, const union Tos, struct RSStruct *, struct RSStruct *);
-};
+	ModReturn *(*plugin_init) (char *, const char *, const char *, const Destinations, RSStruct *, RSStruct *);
+} NPlugin;
 
-struct conf {
+typedef struct stPluginsConf {
 	char *plugin_name;
 	char *plugin_params;
-	struct plugin *start;
-};
+	NPlugin start;
+} PluginsConf;
 
-char *InitConf(char *domain, char *fallback_name, int TryGetEnv);
-char *GetConfLine(const char *user, const char *config_file);
-struct conf *Str2Conf(char *string, int *mods);
+int InitConf(char *domain, char *fallback_name, int TryGetEnv, char *config_file);
+int GetConfLine(char *matchconf, char *addr, char *config_file);
+PluginsConf *Str2Conf(char *config_file, char *user, int *mods);
 

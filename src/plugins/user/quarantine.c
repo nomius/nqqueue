@@ -64,7 +64,7 @@ char *plugin_version()
 	return strdup(PLUGIN_VERSION);
 }
 
-struct ModReturn *plugin_init(char *params, char *mail, const char *From, const union Tos Rcpt, struct RSStruct *general, struct RSStruct *peruser)
+ModReturn *plugin_init(char *params, char *mail, const char *From, const Destinations Rcpt, RSStruct *general, RSStruct *peruser)
 {
 #if HAVE_VPOPMAIL
 	char *vquad_args[5];
@@ -72,8 +72,8 @@ struct ModReturn *plugin_init(char *params, char *mail, const char *From, const 
 	char str_st_size[17];
 #endif
 	struct timeval date;
-	struct RSStruct *init;
-	struct ModReturn *ret = malloc(sizeof(struct ModReturn));
+	RSStruct *init;
+	ModReturn *ret = malloc(sizeof(ModReturn));
 	int isdspam = 0, isclamav = 0, dspam_q = 0, clamav_q = 0, file_count;
 	int orig_fd, dst_fd;
 	int i, q = 0, pid, rmstat;

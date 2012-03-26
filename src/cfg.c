@@ -45,121 +45,119 @@
 /* 
  * Get the configuration file from the NQQFILE or goes to fallback
  */
-char *InitConf(char *domain, char *fallback_name, int TryGetEnv)
+int InitConf(char *domain, char *fallback_name, int TryGetEnv, char *config_file)
 {
-	char *test;
-	char *config_file;
+	char *test = NULL;
 	FILE *testing;
 
 	if (TryGetEnv) {
-
 		/* If getenv gives us something we use that */
 		if ((test = getenv("NQQFILE")) != NULL) {
-			config_file = calloc(strlen(test) + strlen(CONTROLDIR) + 6, sizeof(char));
-			sprintf(config_file, "%s/%s.cfb", CONTROLDIR, test);
-			if (((testing = fopen(config_file, "r")) != NULL)) {
+			snprintf(config_file, PATH_MAX_NQQUEUE, "%s/%s.cfb", CONTROLDIR, test);
+			if ((testing = fopen(config_file, "r")) != NULL) {
 				debug(2, "nqqueue: using environment configuration file: %s\n", test);
 				fclose(testing);
-				return config_file;
+				return 0;
 			}
-			free(config_file);
 		}
 	}
+	errno = 0;
 
 	/* So, no config file defined or couldn't open it. Try domain file */
-	if (domain != NULL) {
-		config_file = calloc(strlen(domain) + strlen(CONTROLDIR) + 6, sizeof(char));
-		sprintf(config_file, "%s/%s.cfb", CONTROLDIR, domain);
+	if (domain) {
+		snprintf(config_file, PATH_MAX_NQQUEUE, "%s/%s.cfb", CONTROLDIR, domain);
 		if ((testing = fopen(config_file, "r")) != NULL) {
 			debug(2, "nqqueue: using domain configuration file: %s\n", domain);
 			fclose(testing);
-			return config_file;
+			return 0;
 		}
-		errno = 0;
-		free(config_file);
 	}
+	errno = 0;
 
 	/* So, final try, let's see if there is a general file, otherwise return NULL */
-	config_file = calloc(13 + strlen(CONTROLDIR), sizeof(char));
-	sprintf(config_file, "%s/%s.cfb", CONTROLDIR, fallback_name);
+	snprintf(config_file, PATH_MAX_NQQUEUE, "%s/%s.cfb", CONTROLDIR, fallback_name);
 	if ((testing = fopen(config_file, "r")) != NULL) {
 		debug(2, "nqqueue: using fallback configuration file: %s\n", fallback_name);
 		fclose(testing);
-		return config_file;
+		return 0;
 	}
 	errno = 0;
 
 	/* Oooops, dude give me something, otherwise you are doing qmail-queue's work twice */
-	free(config_file);
 	debug(2, "nqqueue: no configuration file found\n");
-	return NULL;
+	return 1;
 }
 
 /* 
  * This function parse the configuration file returning the given line
  */
-char *GetConfLine(const char *user, const char *config_file)
+int GetConfLine(char *matchconf, char *addr, char *config_file)
 {
 	FILE *fp;
-	char *l;
-	char *general;
-	char *str;
-	char *buffer_str;
-	char *domain;
-	char *domain_str = NULL, *user_str = NULL, *general_str = NULL;
+	char *domain = NULL, *domain_str = NULL, *user_str = NULL, *general_str = NULL, *tmp = NULL, buffer[BIG_BUFF];
+	int ret = 0;
 
-	buffer_str = calloc(sizeof(char), BUFFER_BIG);
+	*matchconf = '\0';
 
-	if (!config_file)
-		return NULL;
-	if (user == NULL)
-		domain = NULL;
-	else {
-		if ((domain = index(user, '@')) != NULL)
-			domain += 1;
-		else
+	if (addr) {
+		if ((domain = strchr(addr, '@'))) {
+			if (domain + 1) {
+				domain += 1;
+			}
+		}
+		else {
 			domain = NULL;
+		}
+	}
+	else {
+		domain = NULL;
 	}
 
-	if ((fp = fopen(config_file, "r")) == NULL) {
-		debug(3, "nqqueue: error(%d) trying to open: %s\n", errno, config_file);
+	if (!(fp = fopen(config_file, "r"))) {
+		debug(3, "nqqueue: error(%d:%s) trying to open: %s\n", errno, strerror(errno), config_file);
 		exit_clean(EXIT_400);
 	}
 
-	while (fgets(buffer_str, BUFFER_BIG, fp) != NULL) {
-		if (buffer_str[0] == ':')
-			general_str = strdup(buffer_str + 1);
-		else if (domain != NULL && CheckRegex(domain, buffer_str))
-			domain_str = strdup(strchr(buffer_str, ':') + 1);
-		else if (user != NULL && CheckRegex(user, buffer_str)) {
-			user_str = strdup(strchr(buffer_str, ':') + 1);
-			break;
+	while (fgets(buffer, BIG_BUFF, fp)) {
+
+		if (!*buffer)
+			continue;
+
+		/* General file configuration */
+		if (*buffer == ':' && *(buffer + 1))
+			general_str = strdup(buffer + 1);
+
+		/* Domain configuration */
+		else if (domain && CheckRegex(domain, buffer)) {
+			if ((tmp = strchr(buffer, ':')))
+				if (*(tmp+1))
+					domain_str = strdup(tmp);
 		}
-		if (user == NULL && domain_str != NULL)
-			break;
-		if (user == NULL && domain == NULL && general_str != NULL)
-			break;
+
+		/* User exact configuration */
+		else if (addr && CheckRegex(addr, buffer)) {
+			if ((tmp = strchr(buffer, ':')))
+				if (*(tmp+1)) {
+					user_str = strdup(tmp);
+					break;
+				}
+		}
 	}
 
 	fclose(fp);
-	free(buffer_str);
 
-	if (user_str) {
-		if (domain_str)
-			free(domain_str);
-		if (general_str)
-			free(general_str);
-		return user_str;
-	}
-	if (domain_str) {
-		if (general_str)
-			free(general_str);
-		return domain_str;
-	}
-	if (general_str)
-		return general_str;
+	if (user_str)
+		strncpy(matchconf, user_str, BIG_BUFF);
+	else if (domain_str)
+		strncpy(matchconf, domain_str, BIG_BUFF);
+	else if (general_str)
+		strncpy(matchconf, general_str, BIG_BUFF);
+	else
+		ret = 1;
+	
+	free(user_str); free(domain_str); free(general_str);
 
-	return NULL;
+	return ret;
 }
 
 int CheckRegex(char *needed, char *ToUseRegex)
@@ -167,20 +165,19 @@ int CheckRegex(char *needed, char *ToUseRegex)
 #ifdef HAVE_REGEXEC
 	regex_t re;
 	int ret = 0;
-	char *ptr = NULL;
-	char *rgx = strdup(ToUseRegex);
+	char rgx[BIG_BUFF];
+   
+	if (!needed)
+		return 0;
 
-	if ((ptr = strchr(rgx, ':')) != NULL)
-		*ptr = 0;
-	else
-		rgx[strlen(rgx)] = 0;
+	strncpy(rgx, ToUseRegex, BIG_BUFF);
 
-	if(regcomp(&re, rgx, REG_EXTENDED|REG_ICASE) == 0)
-		if(regexec(&re, needed, 0, NULL, 0) == 0)
+	if(!regcomp(&re, rgx, REG_EXTENDED|REG_ICASE)) {
+		if(!regexec(&re, needed, 0, NULL, 0))
 			ret = 1;
 		else
 			ret = 0;
-	free(rgx);
+	}
 	return ret;
 #else
 	return STARTSWITH(needed, ToUseRegex);
@@ -191,38 +188,41 @@ int CheckRegex(char *needed, char *ToUseRegex)
 /* 
  * This function parse the line and create the user configuration array
  */
-struct conf *Str2Conf(char *string, int *mods)
+PluginsConf *Str2Conf(char *config_file, char *user, int *mods)
 {
-	char *token = string, *equal, *init = string;
-	struct conf *ret = NULL;
-	int j;
+	char *token = NULL, *equal = NULL, matchconf[BIG_BUFF], *string = NULL;
+	int j = 0;
+	PluginsConf *ret = NULL;
 
-	if (string == NULL) {
-		*mods = 0;
-		return NULL;
-	}
 	*mods = 0;
-	for (j = 0; token != NULL; j++, string = NULL) {
-		token = strtok(string, ";");
-		if (token != NULL) {
-			ret = realloc(ret, sizeof(struct conf) * (j + 1));
-			equal = index(token, '=');
-			if (equal != NULL) {
+	if (GetConfLine(matchconf, user, config_file))
+		return NULL;
+
+	string = matchconf;
+
+	for (j = 0; (token = strtok(string, ";")); string = NULL, j++) {
+		if (*token == '\0' || *token == '\n')
+			continue;
+		ret = realloc(ret, sizeof(PluginsConf) * (j + 1));
+		memset(ret+j, '\0', sizeof(PluginsConf));
+		if ((equal = strchr(token, '='))) {
+			if (*(equal + 1)) {
 				ret[j].plugin_params = strdup(alltrim(equal + 1));
 				if (ret[j].plugin_params[strlen(ret[j].plugin_params) - 1] == '\n')
-					ret[j].plugin_params[strlen(ret[j].plugin_params) - 1] = 0;
-				*equal = 0;
+					ret[j].plugin_params[strlen(ret[j].plugin_params) - 1] = '\0';
+				*equal = '\0';
 			}
 			else
 				ret[j].plugin_params = NULL;
-			ret[j].plugin_name = strdup(alltrim(token));
-			if (ret[j].plugin_name[strlen(ret[j].plugin_name) - 1] == '\n')
-				ret[j].plugin_name[strlen(ret[j].plugin_name) - 1] = 0;
-			(*mods) += 1;
-			debug(2, "nqqueue: Loading settings for plugin %s.so\n", ret[j].plugin_name);
 		}
+		else
+			ret[j].plugin_params = NULL;
+		ret[j].plugin_name = strdup(alltrim(token));
+		if (ret[j].plugin_name[strlen(ret[j].plugin_name) - 1] == '\n')
+			ret[j].plugin_name[strlen(ret[j].plugin_name) - 1] = '\0';
+		(*mods) += 1;
+		debug(2, "nqqueue: Loading settings for plugin %s.so\n", ret[j].plugin_name);
 	}
-	free(init);
 	return ret;
 }
 

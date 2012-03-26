@@ -1,6 +1,6 @@
 dnl vim: set sw=8 sts=8 noet :
 
-AC_INIT([NQqueue], [0.2])
+AC_INIT([NQqueue], [0.3])
 AC_PREREQ(2.5)
 AM_INIT_AUTOMAKE(1.9)
 AM_PROG_LIBTOOL
@@ -19,8 +19,8 @@ AC_C_BIGENDIAN
 AC_C_INLINE
 AC_CHECK_SIZEOF(int, 32)
 NQQUEUE_HOME="/var/qmail/nqqueue"
-QMAILDUID=`id -u qmaild`
-NOFILESGID=`id -g qmaild`
+QMAILDUID=`stat -c "%U" /var/qmail/bin/qmail-queue`
+NOFILESGID=`stat -c "%G" /var/qmail/bin/qmail-queue`
 AC_DEFINE_UNQUOTED([NQQUEUE_HOME], "${NQQUEUE_HOME}", [Do not change this])
 AC_DEFINE_UNQUOTED([NQQUEUE_WORKDIR], "${NQQUEUE_HOME}/queue", [Do not change this either])
 AC_DEFINE([CONTROLDIR], ["/var/qmail/control"], [Do not change this])
@@ -178,6 +178,7 @@ case $BUILD_VQUAD in
 	*)
 		if test "x$BUILD_VQUAD" = "xyes" ; then
 			if test "x$BUILD_QUARANTINE" = "xyes" ; then
+				AM_PROG_CC_C_O
 				BUILD_VQUAD=yes
 				AC_DEFINE_UNQUOTED([HAVE_VPOPMAIL], 1, [have vpopmail for vquad])
 				echo Building vpopmail support for quarantine plugin

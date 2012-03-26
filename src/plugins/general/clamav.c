@@ -109,13 +109,13 @@ int is_clamav(char *clambuf, int *InHeaders)
 	return 0;
 }
 
-struct ModReturn *plugin_init(char *params, const char *mail, const char *From, const union Tos Rcpt, struct RSStruct *general, struct RSStruct *peruser)
+ModReturn *plugin_init(char *params, const char *mail, const char *From, const Destinations Rcpt, RSStruct *general, RSStruct *peruser)
 {
 	int pid, rmstat, n, fd;
 	int pim[2];
 	int InHeaders = 1, isclamav = 0;
 	char *clamav_args[] = { "clamdscan", "--stdout", "-", NULL };
-	struct ModReturn *ret = malloc(sizeof(struct ModReturn));
+	ModReturn *ret = malloc(sizeof(ModReturn));
 	char buffer[BUFF_SIZE];
 
 	if ((fd = open(mail, O_RDONLY, 0644)) == -1) {

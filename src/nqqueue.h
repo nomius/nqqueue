@@ -28,25 +28,47 @@
  * POSSIBILITY OF SUCH DAMAGE.
 */
 
-union Tos {
-	char *rcpt;
-	struct PUStruct *RcptTos;
-};
+#ifndef NQQUEUE_H
+#define NQQUEUE_H
 
-struct RSStruct {
+/* My godness */
+#ifndef PATH_MAX_NQQUEUE
+#define PATH_MAX_NQQUEUE 1024
+#endif
+
+/* Right now, the IETF set the max size of an email address to 254 to keep it under 256 */
+#ifndef ADDR_MAX_SIZE
+#define ADDR_MAX_SIZE 254
+#endif
+
+typedef struct stPUStruct {
+	char To[ADDR_MAX_SIZE];
+	char File[PATH_MAX_NQQUEUE];
+	int deliver;
+	pthread_t Index;
+} PUStruct;
+
+typedef union uDestinations {
+	char *rcpt;
+	PUStruct *RcptTos;
+} Destinations;
+
+typedef struct stRSStruct {
 	char *plugin_name;
 	char *plugin_params;
 	char *plugin_version;
 	int returned;
-};
+} RSStruct;
 
-struct ModReturn {
-	char *NewFile;
+typedef struct stModReturn {
 	int ret;
+	char *NewFile;
 	int rejected;
 	char *message;
-};
+} ModReturn;
 
-char *NewNameRename(char *Init);
+void NewNameRename(char *Init, char *Dest);
 char *alltrim(char *ptr);
 void debug(int level, char *fmt, ...);
+
+#endif

@@ -42,334 +42,286 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <dirent.h>
-#include "nqqueue.h"
 #include "general.h"
 #include "delivery.h"
+#include "nqqueue.h"
 #include "cfg.h"
 
 /* 
  * Load plugin symbols
  */
-struct plugin *symbols_load(void *handler, char *mod)
-{
-	const char *errmsg;
-	struct plugin *init;
-
-	/* Create a structure for the plugins */
-	init = calloc(1, sizeof(struct plugin));
-
-	/* Load the plugin and point every function to its address */
-	init->plugin_name = dlsym(handler, "plugin_name");
-	if ((errmsg = dlerror()) != NULL) {
-		debug(4, "nqqueue: error (%d) no plugin_name symbol found in %s\n", errno, mod);
-		free(init);
-		return NULL;
+#define dynamic_symbol_resolution(ph, fn, sfn) \
+	\
+	/* Clear all dl errors before getting started */ \
+	dlerror(); \
+	\
+	/* Use dlsym to resolve the given symbol and point fn function to the 
+	 * resolved address [1] */ \
+	*(void**)&fn = dlsym(ph, sfn); \
+	\
+	/* Check if there was any errors in dlsym() */ \
+	if ((plerror = dlerror())) { \
+		debug(4, "nqqueue: error, symbol %s in %s not found\n", sfn, mod); \
+		continue; \
 	}
-
-	init->plugin_version = dlsym(handler, "plugin_version");
-	if ((errmsg = dlerror()) != NULL) {
-		debug(4, "nqqueue: error (%d) no plugin_version symbol found in %s\n", errno, mod);
-		free(init);
-		return NULL;
-	}
-	init->plugin_init = dlsym(handler, "plugin_init");
-	if ((errmsg = dlerror()) != NULL) {
-		debug(4, "nqqueue: error (%d) no plugin_init symbol found in %s\n", errno, mod);
-		free(init);
-		return NULL;
-	}
-	return init;
-}
 
 /* 
  * This will run all the plugins per single user. When finished, it will call to delivery for local users.
  */
 void *RunPerUserScannersAndDelivery(void *Data)
 {
-	int i = 0;
-	int ret = 0;
-	int nPlugins;
-	int PerUserScanners = 1;
-	void *mod_handler;
-	struct conf *conf_array = NULL;
-	struct ModReturn *returned;
-	struct PUStruct *me = (struct PUStruct *)Data;
-	char *mod_name, *mod_version;
-	char *File = calloc(255, sizeof(char));
-	char mod[sizeof(PLUGINS_LOCATION) + 255 + 15];
-	char *domain = index(me->To, '@') + 1;
-	char *config_file = InitConf(domain, "nqqueue", 1);
-	struct RSStruct *PerUserRunnedScanners;
-	union Tos tmp;
+	char *plerror = NULL, *mod_name = NULL, *mod_version = NULL, *domain = NULL, config_file[PATH_MAX_NQQUEUE], mod[PATH_MAX_NQQUEUE], File[PATH_MAX_NQQUEUE];
+	int i = 0, ret = 0, nPlugins = 0, PerUserScanners = 0;
+	void *mod_handler = NULL;
+	PluginsConf *conf_array = NULL;
+	ModReturn *returned = NULL;
+	RSStruct *PerUserRunnedScanners = NULL;
+	Destinations tmp;
+	PUStruct *me = (PUStruct *)Data;
 
-	sprintf(File, "%s", me->File);
-	free(me->File);
+	/* Get the domain name of this destination */
+	if ((domain = index(me->To, '@')))
+	   	domain += 1;
+
+	/* Initialize message file loop file */
+	snprintf(File, PATH_MAX_NQQUEUE, "%s", me->File);
+
+	/* Point the tmp union to this particular To */
 	tmp.rcpt = me->To;
 
-	PerUserRunnedScanners = malloc(sizeof(struct RSStruct));
-	PerUserRunnedScanners[PerUserScanners - 1].plugin_name = NULL;
+	/* Initialize the configuration file name using the general rules */
+	if (!InitConf(domain, "nqqueue", 0, config_file)) {
 
-	if (config_file != NULL) {
-
-		/* Great, we have configuration file, so load it and the conf itself */
-		conf_array = Str2Conf(GetConfLine(me->To, config_file), &nPlugins);
+		/* Load the configuration strings array */
+		conf_array = Str2Conf(config_file, me->To, &nPlugins);
 
 		for (i = 0; i < nPlugins && ret != 1; i++) {
 
 			/* Get the full plugin name, PLUGINS_LOCATION/user/plugin_name.so */
-			sprintf(mod, "%s/user/%s.so", PLUGINS_LOCATION, conf_array[i].plugin_name);
+			snprintf(mod, PATH_MAX_NQQUEUE, "%s/user/%s.so", PLUGINS_LOCATION, conf_array[i].plugin_name);
 
 			/* Try to load the plugin */
 			if ((mod_handler = dlopen(mod, RTLD_NOW)) == NULL) {
-				debug(3, "nqqueue: error (%d) can't open plugin %s.so\n", errno, conf_array[i].plugin_name);
+				debug(3, "nqqueue: error can't open plugin %s.so\n", conf_array[i].plugin_name);
 				debug(5, "nqqueue: error: %s\n", dlerror());
 
 				/* This should be configurable in the future: If can't open plugin, then try the next one... Or die? */
 				/*_exit(EXIT_400);*/
 				continue;
 			}
-
-			/* Clear errors and point the symbols of the desired  plugin */
+			/* Clear errors and point the symbols of the desired plugin */
 			dlerror();
-			if ((conf_array[i].start = symbols_load(mod_handler, conf_array[i].plugin_name)) == NULL)
-				continue;
+
+			/* Load all our plugin functions */
+			dynamic_symbol_resolution(mod_handler, conf_array[i].start.plugin_name, "plugin_name")
+			dynamic_symbol_resolution(mod_handler, conf_array[i].start.plugin_version, "plugin_version")
+			dynamic_symbol_resolution(mod_handler, conf_array[i].start.plugin_init, "plugin_init")
 
 			/* Save the plugin_name and plugin_version data */
-			mod_name = conf_array[i].start->plugin_name();
-			mod_version = conf_array[i].start->plugin_version();
-			debug(2, "nqqueue: Loaded plugin: %s.so\n", mod_name);
+			mod_name = conf_array[i].start.plugin_name();
+			mod_version = conf_array[i].start.plugin_version();
+			debug(2, "nqqueue: Loaded plugin: %s v%s\n", mod_name, mod_version);
 
 			/* Heiya! Run it damn it! */
-			returned = conf_array[i].start->plugin_init(conf_array[i].plugin_params, File, MailFrom, tmp, GlobalRunnedScanners, PerUserRunnedScanners);
-
-			/* if returned is NULL, then I suppose there was an error. So no register is made */
-			if (returned) {
+			if ((returned = conf_array[i].start.plugin_init(conf_array[i].plugin_params, File, MailFrom, tmp, GlobalRunnedScanners, PerUserRunnedScanners))) {
+			
+				/* if returned isn't NULL, then it could be rejected or accepted... Let's check it */
 				if (returned->rejected) {
 
 					/* Ok, if 1 was returned it is because the plugin rejected the message */
-					if (!strcmp(MailFrom, ""))
-						debug(2, "nqqueue: Message from anonymous sender to %s rejected by %s.so\n", tmp.rcpt, mod_name);
-					else
-						debug(2, "nqqueue: Message from %s to %s rejected by %s.so\n", MailFrom, tmp.rcpt, mod_name);
+					debug(2, "nqqueue: Message from %s to %s rejected by %s\n", MailFrom, tmp.rcpt, mod_name);
 
-					/* So remove File, free the To and leave */
+					/* So remove File and leave */
 					unlink(File);
 					errno = 0;
-					free(me->To);
 					ret = 1;
 				}
 				else {
-					if (!strcmp(MailFrom, ""))
-						debug(2, "nqqueue: Message from anonymous sender to %s accepted by %s.so\n", tmp.rcpt, mod_name);
-					else
-						debug(2, "nqqueue: Message from %s to %s accepted by %s.so\n", MailFrom, tmp.rcpt, mod_name);
-					PerUserRunnedScanners = realloc(PerUserRunnedScanners, sizeof(struct RSStruct) * PerUserScanners + 1);
-					PerUserRunnedScanners[PerUserScanners - 1].plugin_name = strdup(mod_name);
-					PerUserRunnedScanners[PerUserScanners - 1].plugin_version = strdup(mod_version);
+					debug(2, "nqqueue: Message from %s to %s accepted by %s\n", MailFrom, tmp.rcpt, mod_name);
+					PerUserRunnedScanners = realloc(PerUserRunnedScanners, sizeof(RSStruct) * (PerUserScanners + 2));
+					PerUserRunnedScanners[PerUserScanners].plugin_name = strdup(mod_name);
+					PerUserRunnedScanners[PerUserScanners].plugin_version = strdup(mod_version);
 					if (conf_array[i].plugin_params)
-						PerUserRunnedScanners[PerUserScanners - 1].plugin_params = strdup(conf_array[i].plugin_params);
-					PerUserRunnedScanners[PerUserScanners - 1].returned = returned->ret;
-					PerUserRunnedScanners[PerUserScanners].plugin_name = NULL;
+						PerUserRunnedScanners[PerUserScanners].plugin_params = strdup(conf_array[i].plugin_params);
+					else
+						PerUserRunnedScanners[PerUserScanners].plugin_params = NULL;
+					
+					PerUserRunnedScanners[PerUserScanners].returned =  returned->ret;
 					PerUserScanners += 1;
 
+					memset(PerUserRunnedScanners+PerUserScanners, '\0', sizeof(RSStruct));
+
 					if (returned->NewFile) {
-						free(File);
-						File = strdup(returned->NewFile);
+						strcpy(File, returned->NewFile);
 						free(returned->NewFile);
 					}
 				}
+				free(returned->message);
 				free(returned);
 			}
 			dlclose(mod_handler);
+
+			/* Since we have it already registered, free that memory */
 			free(mod_name);
 			free(mod_version);
+
 			free(conf_array[i].plugin_name);
-			if (conf_array[i].plugin_params)
-				free(conf_array[i].plugin_params);
-			free(conf_array[i].start);
+			free(conf_array[i].plugin_params);
 		}
-		if (conf_array)
-			free(conf_array);
-		free(config_file);
+		free(conf_array);
 	}
 
 	/* If all plugins allowed the email, then make the delivery */
-	if (ret == 0)
+	if (!ret)
 		delivery(me->To, File, PerUserRunnedScanners, PerUserScanners);
 
 	/* End the thread in the right way */
-	me->Index = (pthread_t)-1;
 	pthread_exit(NULL);
 }
 
 /* 
  * Run general plugins
  */
-char *RunGeneralScanners()
+void RunGeneralScanners(char *OutputFile)
 {
-	int i = 0;
-	int ret = 0;
-	int nPlugins;
-	void *mod_handler;
-	char *mod_name, *mod_version;
-	char *File = calloc(255, sizeof(char));
-	char mod[sizeof(PLUGINS_LOCATION) + 255 + 15];
-	char *config_file = InitConf(NULL, "general", 0);
-	struct conf *conf_array = NULL;
-	struct ModReturn *returned;
-	union Tos tmp;
+	int i = 0, ret = 0, nPlugins = 0;
+	char *plerror = NULL, *mod_name = NULL, *mod_version = NULL, File[PATH_MAX_NQQUEUE], mod[PATH_MAX_NQQUEUE], config_file[PATH_MAX_NQQUEUE];
+	void *mod_handler = NULL;
+	PluginsConf *conf_array = NULL;
+	ModReturn *returned;
+	Destinations tmp;
 
-	/* Initialize message file */
-	sprintf(File, "%s", MESSAGE_FILE);
+	/* Initialize the configuration file name using the general rules */
+	if (InitConf(NULL, "general", 0, config_file)) {
+		snprintf(OutputFile, PATH_MAX_NQQUEUE, "%s", MESSAGE_FILE);
+		return;
+	}
 
-	/* Initialize GlobalRunnedScanners pointer */
-	GlobalScanners = 1;
-	GlobalRunnedScanners = malloc(sizeof(struct RSStruct));
-	GlobalRunnedScanners[GlobalScanners - 1].plugin_name = NULL;
+	/* Initialize message file loop file */
+	snprintf(File, PATH_MAX_NQQUEUE, "%s", MESSAGE_FILE);
 
-	if (config_file != NULL) {
+	/* Point the tmp union to all the To's */
+	tmp.RcptTos = RcptTo;
 
-		/* Point the tmp union to all the To's */
-		tmp.RcptTos = RcptTo;
+	/* Load the configuration strings array */
+	conf_array = Str2Conf(config_file, IsLocal(MailFrom) ? MailFrom : NULL, &nPlugins);
 
-		/* Great, we have configuration file, so load it depending if the sender is local or not */
-		if (IsLocal(MailFrom))
-			conf_array = Str2Conf(GetConfLine(MailFrom, config_file), &nPlugins);
-		else
-			conf_array = Str2Conf(GetConfLine(NULL, config_file), &nPlugins);
+	/* Let's go through every plugin */
+	for (i = 0; i < nPlugins && ret != 1; i++) {
 
-		for (i = 0; i < nPlugins && ret != 1; i++) {
+		/* Get the full plugin name, PLUGINS_LOCATION/general/plugin_name.so */
+		snprintf(mod, PATH_MAX_NQQUEUE, "%s/general/%s.so", PLUGINS_LOCATION, conf_array[i].plugin_name);
 
-			/* Get the full plugin name, PLUGINS_LOCATION/general/plugin_name.so */
-			sprintf(mod, "%s/general/%s.so", PLUGINS_LOCATION, conf_array[i].plugin_name);
+		/* Try to load the plugin */
+		if (!(mod_handler = dlopen(mod, RTLD_NOW))) {
+			debug(3, "nqqueue: error can't open plugin %s.so\n", conf_array[i].plugin_name);
+			debug(4, "nqqueue: error: %s\n", dlerror());
 
-			/* Try to load the plugin */
-			if ((mod_handler = dlopen(mod, RTLD_NOW)) == NULL) {
-				debug(3, "nqqueue: error (%d) can't open plugin %s.so\n", errno, conf_array[i].plugin_name);
-				debug(4, "nqqueue: error: %s\n", dlerror());
+			/* This should be configurable in the future: If can't open plugin, then try the next one... Or die? */
+			/*_exit(EXIT_400);*/
+			continue;
+		}
+		/* Clear errors and point the symbols of the desired plugin */
+		dlerror();
 
-				/* This should be configurable in the future: If can't open plugin, then try the next one... Or die? */
-				/*_exit(EXIT_400);*/
-				continue;
-			}
+		/* Load all our plugin functions */
+		dynamic_symbol_resolution(mod_handler, conf_array[i].start.plugin_name, "plugin_name")
+		dynamic_symbol_resolution(mod_handler, conf_array[i].start.plugin_version, "plugin_version")
+		dynamic_symbol_resolution(mod_handler, conf_array[i].start.plugin_init, "plugin_init")
 
-			/* Clear errors and point the symbols of the desired plugin */
-			dlerror();
-			if ((conf_array[i].start = symbols_load(mod_handler, conf_array[i].plugin_name)) == NULL)
-				continue;
+		/* Save the plugin_name and plugin_version data. Free them before the next iteration */
+		mod_name = conf_array[i].start.plugin_name();
+		mod_version = conf_array[i].start.plugin_version();
+		debug(2, "nqqueue: Loaded plugin: %s.so %s\n", mod_name);
 
-			/* Save the plugin_name and plugin_version data. Free them before the next iteration */
-			mod_name = conf_array[i].start->plugin_name();
-			mod_version = conf_array[i].start->plugin_version();
-			debug(2, "nqqueue: Loaded plugin: %s.so\n", mod_name);
+		/* Heiya! Run it damn it! */
+		if ((returned = conf_array[i].start.plugin_init(conf_array[i].plugin_params, File, MailFrom, tmp, GlobalRunnedScanners, NULL))) {
 
-			/* Heiya! Run it damn it! */
-			returned = conf_array[i].start->plugin_init(conf_array[i].plugin_params, File, MailFrom, tmp, GlobalRunnedScanners, NULL);
+			/* if returned isn't NULL, then it could be rejected or accepted... Let's check it */
+			if (returned->rejected) {
 
-			/* if returned is NULL, then I suppose there was an error. So no register is made */
-			if (returned) {
-				if (returned->rejected) {
+				/* Ok, if 1 was returned it is because the plugin rejected the message so tell that */
+				debug(2, "nqqueue: Message from %s rejected by %s.so\n", MailFrom, mod_name);
 
-					/* Ok, if 1 was returned it is because the plugin rejected the message so tell that */
-					if (!strcmp(MailFrom, ""))
-						debug(2, "nqqueue: Message from anonymous sender rejected by %s.so\n", mod_name);
-					else
-						debug(2, "nqqueue: Message from %s rejected by %s.so\n", MailFrom, mod_name);
-
-					/* Print the message if any, free the MailFrom and finish */
-					if (returned->message != NULL) {
-						snprintf(mod, 255 + 15 + sizeof(PLUGINS_LOCATION), "D%s", returned->message);
-						write(4, mod, strlen(mod));
-						free(returned->message);
-					}
-					if (MailFrom)
-						free(MailFrom);
-					ret = 1;
+				/* Send the rejected message back to qmail if any */
+				if (returned->message) {
+					snprintf(mod, 255 + 15 + sizeof(PLUGINS_LOCATION), "D%s", returned->message);
+					write(4, mod, strlen(mod));
+					free(returned->message);
 				}
-				else {
-
-					/* Great, message accepted by the runned scanner */
-					if (!strcmp(MailFrom, ""))
-						debug(2, "nqqueue: Message from anonymous sender accepted by %s.so\n", mod_name);
-					else
-						debug(2, "nqqueue: Message from %s accepted by %s.so\n", MailFrom, mod_name);
-
-					/* Register this new scanner */
-					GlobalRunnedScanners = realloc(GlobalRunnedScanners, sizeof(struct RSStruct) * GlobalScanners + 1);
-					GlobalRunnedScanners[GlobalScanners - 1].plugin_name = strdup(mod_name);
-					GlobalRunnedScanners[GlobalScanners - 1].plugin_version = strdup(mod_version);
-					if (conf_array[i].plugin_params)
-						GlobalRunnedScanners[GlobalScanners - 1].plugin_params = strdup(conf_array[i].plugin_params);
-					GlobalRunnedScanners[GlobalScanners - 1].returned = returned->ret;
-
-					/* Point the next one to NULL to say this is the last one for now */
-					GlobalRunnedScanners[GlobalScanners].plugin_name = NULL;
-					GlobalScanners += 1;
-
-					if (returned->NewFile) {
-						free(File);
-						File = strdup(returned->NewFile);
-						free(returned->NewFile);
-					}
-				}
-				free(returned);
+				ret = 1;
 			}
+			else {
 
-			/* Since we have it already registered, free that memory */
-			free(mod_name);
-			free(mod_version);
+				/* Great, message accepted by the runned scanner */
+				debug(2, "nqqueue: Message from %s accepted by %s.so\n", MailFrom, mod_name);
 
-			/* Free this element in the conf array since it was already runned */
-			free(conf_array[i].plugin_name);
-			if (conf_array[i].plugin_params)
-				free(conf_array[i].plugin_params);
+				/* Register this new scanner */
+				GlobalRunnedScanners = realloc(GlobalRunnedScanners, sizeof(RSStruct) * (GlobalScanners + 2));
+				GlobalRunnedScanners[GlobalScanners - 1].plugin_name = strdup(mod_name);
+				GlobalRunnedScanners[GlobalScanners - 1].plugin_version = strdup(mod_version);
+				if (conf_array[i].plugin_params)
+					GlobalRunnedScanners[GlobalScanners - 1].plugin_params = strdup(conf_array[i].plugin_params);
+				GlobalRunnedScanners[GlobalScanners - 1].returned = returned->ret;
 
-			/* Free the start structure */
-			free(conf_array[i].start);
+				/* Point the next one to NULL to say this is the last one for now */
+				GlobalRunnedScanners[GlobalScanners].plugin_name = NULL;
+				GlobalScanners += 1;
 
-			/* Close the plugin handler */
-			dlclose(mod_handler);
+				memset(GlobalRunnedScanners+GlobalScanners, '\0', sizeof(RSStruct));
+
+				if (returned->NewFile) {
+					strcpy(File, returned->NewFile);
+					free(returned->NewFile);
+				}
+			}
+			free(returned);
 		}
 
-		/* Free the configuration array and the global configuration file as we are done here */
-		if (conf_array)
-			free(conf_array);
-		free(config_file);
+		/* Since we have it already registered, free that memory */
+		free(mod_name);
+		free(mod_version);
+
+		/* Free this element in the conf array since it was already runned */
+		free(conf_array[i].plugin_name);
+		free(conf_array[i].plugin_params);
+
+		/* Close the plugin handler */
+		dlclose(mod_handler);
 	}
+
+	/* Free the configuration array and the global configuration file as we are done here */
+	free(conf_array);
+	
 	/* If the message was rejected, then just clean and exit */
-	if (ret == 1)
+	if (ret)
 		exit_clean(EXIT_MSG);
-	return File;
+
+	strncpy(OutputFile, File, PATH_MAX_NQQUEUE);
 }
 
 /* 
  * The main function... Don't ask :-D
  */
-int main(int argc, char **argv)
+int main(int argc, char *argv[])
 {
-	int pim[2];
-	char *buffer;
-	char *RcptToLocal;
-	char *new_file;
-	char *Msg;
-	int ret;
-	int fd;
-	int tmpread;
-	int i;
-	int pid;
+	char buffer[BIG_BUFF], *tmp = NULL, Msg[PATH_MAX_NQQUEUE];
+	int ret, fd, i, tmpread;
+	pthread_attr_t attrs;
 
 #ifdef HAS_ULIMIT_NPROC
 	struct rlimit limits;
 #endif
-
 	/* Only version check, nothing else */
-	if (argv[1] != NULL && (strcasecmp(argv[1], "-v") || strcasecmp(argv[1], "--version"))) {
+	if (argc > 1 && (strcasecmp(argv[1], "-v") || strcasecmp(argv[1], "--version"))) {
 		printf("nqqueue %s\n", VERSION);
 		exit(0);
 	}
 
-	/* Before anything, set qstat to 0 in case we have no delivery to do */
-	qstat = 0;
+	/* Before anything, initialize counters pointers and the return value */
+	qstat = RcptTotal = LocalRcpt = RemoteRcpt = GlobalScanners = 0;
+	GlobalRunnedScanners = NULL;
+	RcptTo = NULL;
 
 #ifdef HAS_ULIMIT_NPROC
 	/* Set ulimits to prevent hangs if it forks too many processes */
@@ -381,22 +333,23 @@ int main(int argc, char **argv)
 	umask(0022);
 
 	/* Get the time, as we are gonna use it and set debug as desired */
-	gettimeofday(&start, (struct timezone *)0);
-	if ((buffer = getenv("NQQUEUE_DEBUG")) != NULL)
-		debug_flag = atoi(buffer);
+	gettimeofday(&start, (struct timezone *)NULL);
+
+	/* Get the debug information */
+	if ((tmp = getenv("NQQUEUE_DEBUG")) != NULL)
+		debug_flag = atoi(tmp);
 	else
 		debug_flag = 0;
 
 	/* Since we have start, we can use that to create a directory */
-	indexdir = calloc(SMALL_BUFF, sizeof(char));
-	snprintf(indexdir, SMALL_BUFF, "%s/%ld.%ld.%ld", NQQUEUE_WORKDIR, start.tv_sec, start.tv_usec, (long int)getpid());
+	snprintf(indexdir, PATH_MAX_NQQUEUE, "%s/%ld.%ld.%ld", NQQUEUE_WORKDIR, start.tv_sec, start.tv_usec, (long int)getpid());
 	if (mkdir(indexdir, 0750) == -1) {
 		debug(3, "nqqueue: error (%d) creating %s directory to work\n", errno, indexdir);
 		_exit(EXIT_400);
 	}
 
 	/* change to the new working directory */
-	if (chdir(indexdir) != 0) {
+	if (chdir(indexdir)) {
 		debug(3, "nqqueue: error (%d) changing directory to workdir\n", errno);
 		exit_clean(EXIT_400);
 	}
@@ -408,76 +361,75 @@ int main(int argc, char **argv)
 	}
 
 	/* read the email into the new file */
-	buffer = calloc(sizeof(char), SMALL_BUFF);
-	while ((ret = read(0, buffer, sizeof(buffer))) > 0) {
+	while ((ret = read(STDIN_FILENO, buffer, sizeof(buffer))) > 0) {
 		if (write(fd, buffer, ret) == -1) {
-			debug(3, "nqqueue: error (%d) writing msg\n", errno);
+			debug(3, "nqqueue: error (%d) writing msg to %s\n", errno, MESSAGE_FILE);
 			exit_clean(EXIT_400);
 		}
-		memset(buffer, 0, ret);
 	}
-	free(buffer);
+	/* If ret < 0 there was an error in the reading, so we abort */
+	if (ret < 0) {
+		debug(3, "nqqueue: error (%d) reading file from SMTP\n", errno);
+		exit_clean(EXIT_400);
+	}
 
 	/* close the file */
-	if (close(fd) == -1) {
+	if (close(fd)) {
 		debug(3, "nqqueue: error (%d) closing email file\n", errno);
 		exit_clean(EXIT_400);
 	}
 
-	/* read/write in the email addresses and put them in memory */
-	buffer = calloc(sizeof(char), SMALL_BUFF);
-	RcptTotal = 0;
-	MailFrom = NULL;
-	RcptTo = NULL;
-	while ((tmpread = read(1, buffer, SMALL_BUFF - 1)) > 0) {
-		if (RcptTotal == 0) {
-			MailFrom = strdup(buffer + 1);
-			strlower(MailFrom);
-		}
-		for (i = 0; i < tmpread && buffer[i] != 0; ++i) ;
-		i += 2;
-		while (i < tmpread) {
-			RcptTotal += 1;
-			RcptTo = realloc(RcptTo, RcptTotal * sizeof(struct PUStruct));
-			RcptTo[RcptTotal - 1].To = strdup(&(buffer[i]));
-			strlower(RcptTo[RcptTotal - 1].To);
-			RcptTo[RcptTotal - 1].Index = 0;
-			while (i < tmpread && buffer[i] != 0)
-				i++;
-			i += 2;
-		}
-		memset(buffer, 0, tmpread);
-	}
-	free(buffer);
+	/* 
+	 * READ THE ADDRESSES COMMING FROM THE 0 FILE DESCRIPTOR AND STORE THEM IN MEMORY
+	 * THE FORMAT OF THE INCOMING DATA IS: AddrOrig\0TDestAddr1\0TDestAddr2\0T...\0
+	 */
 
+	while ((tmpread = read (STDOUT_FILENO, buffer, sizeof(buffer))) > 0) {
+		/* Read the Origin Address */
+		if (RcptTotal == 0)
+			strlower(buffer+1, MailFrom);
+		/* Next addr + \0 + T */
+		for (i = 0; i < tmpread && buffer[i] != 0; ++i) ; i += 2;
+
+		while (i < tmpread) {
+			RcptTo = realloc(RcptTo, (RcptTotal+1) * sizeof(PUStruct));
+			strlower(buffer+i, RcptTo[RcptTotal].To);
+			RcptTo[RcptTotal].deliver = 1;
+			for (; i < tmpread && buffer[i] != 0; ++i) ; i += 2;
+			RcptTotal += 1;
+		}
+		memset (buffer, '\0', tmpread);
+	}
+
+	/* Sanity check point 1 to see if qmail-smtpd died for unknown reasons */
 	if (getppid() == 1) {
 		debug(3, "nqqueue: parent died, exiting\n");
-		exit_clean(EXIT_0);
+		exit_clean(EXIT_0);   /* <---- This is kinda hilarious */
 	}
 
-	if (MailFrom == NULL && RcptTo == NULL) {
+	/* Sanity check point 2 check if we are missing origin and/or destination addresses */
+	if (*MailFrom == '\0' || RcptTotal == 0) {
 		debug(3, "nqqueue: got empty data, exiting with error code: %d\n", EXIT_400);
 		exit_clean(EXIT_400);
 	}
 
-	LocalRcpt = RemoteRcpt = 0;
+	/* First part of the scanning process: General Scanners */
+	RunGeneralScanners(Msg);
 
-	Msg = RunGeneralScanners();
+	pthread_attr_init(&attrs);
+	pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_JOINABLE);
 
 	for (i = 0; i < RcptTotal; i++) {
 		if (IsLocal(RcptTo[i].To)) {
-			new_file = calloc(strlen(Msg) + 2 + strlen(RcptTo[i].To), sizeof(char));
-			sprintf(new_file, "%s.%s", Msg, RcptTo[i].To);
-			new_file[strlen(new_file)] = 0;
-			copy(Msg, new_file);
-			RcptTo[i].File = new_file;
-			RcptTo[i].Index = (pthread_t)-1;
+			snprintf(buffer, PATH_MAX_NQQUEUE, "%s.%s", Msg, RcptTo[i].To);
+			copy(Msg, buffer);
+			strncpy(RcptTo[i].File, buffer, PATH_MAX_NQQUEUE);
+			RcptTo[i].deliver = 0;
 			LocalRcpt += 1;
-			if (pthread_create(&(RcptTo[i].Index), NULL, RunPerUserScannersAndDelivery, RcptTo + i) != 0)
+			if (pthread_create(&(RcptTo[i].Index), &attrs, RunPerUserScannersAndDelivery, RcptTo + i) != 0)
 				debug(3, "nqqueue: error (%d) creating thread\n", errno);
 		}
 		else {
-			RcptTo[i].Index = (pthread_t)-1;
 			RemoteRcpt += 1;
 		}
 	}
@@ -486,23 +438,20 @@ int main(int argc, char **argv)
 	if (RemoteRcpt > 0)
 		deliveryAll(Msg);
 
-	/* Wait for all the per user scanners threads */
+	/* Wait for all per user scanners threads to finish scanning + delivery */
 	for (i = 0; i < RcptTotal; i++)
-		if (RcptTo[i].Index != (pthread_t)-1)
+		if (!RcptTo[i].deliver)
 			pthread_join(RcptTo[i].Index, NULL);
 
 	/* Free the RcptTo array and the MailFrom pointer */
 	free(RcptTo);
-	free(MailFrom);
 
-	debug(4, "removing files used in the analysis\n");
+	debug(4, "nqqueue: removing files used in the analysis\n");
 	/* remove the working files */
 	if (remove_files(indexdir) == -1)
 		exit_clean(EXIT_400);
 
-	free(indexdir);
-
-	debug(4, "exiting nqqueue with status: %d\n", WEXITSTATUS(qstat));
+	debug(4, "nqqueue: exiting nqqueue with status: %d\n", WEXITSTATUS(qstat));
 	/* pass qmail-queue's exit status from deliveryAll on */
 	exit(WEXITSTATUS(qstat));
 

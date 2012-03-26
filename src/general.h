@@ -28,9 +28,10 @@
  * POSSIBILITY OF SUCH DAMAGE.
 */
 
+#include "nqqueue.h"
 #include "config.h"
 
-#define MESSAGE_FILE "message.nqqueue"
+#define MESSAGE_FILE "message.orig"
 
 /* qmail-queue error codes */
 #define EXIT_0     0			/* Success */
@@ -39,32 +40,26 @@
 #define EXIT_500  31			/* permenent refusal to accept message SMTP: 5XX code */
 #define EXIT_MSG  82			/* exit with custom error message */
 
-#define BUFFER_BIG  8192
+#define BIG_BUFF  8192
 #define SMALL_BUFF 4096
+#define MINI_BUFF 1024
 
 #define SECS(tv) (tv.tv_sec + tv.tv_usec / 1000000.0)
 
 /* Debug flag */
 int debug_flag;
 
-/* Work directory (free on exit) */
-char *indexdir;
+/* Work directory */
+char indexdir[PATH_MAX_NQQUEUE];
 
 /* Times issue */
 struct timeval start, stop;
 
-/* from (free on exit too) */
-char *MailFrom;
+/* From origin */
+char MailFrom[ADDR_MAX_SIZE];
 
-/* Per User structure */
-struct PUStruct {
-	char *To;
-	char *File;
-	pthread_t Index;
-};
-
-/* Rcpto (all the To's are freed on exit) */
-struct PUStruct *RcptTo;
+/* Destination emails */
+PUStruct *RcptTo;
 
 /* Number of total receivers */
 int RcptTotal;
@@ -73,7 +68,7 @@ int RcptTotal;
 int LocalRcpt, RemoteRcpt;
 
 /* Runned scanners data */
-struct RSStruct *GlobalRunnedScanners;
+RSStruct *GlobalRunnedScanners;
 int GlobalScanners;
 
 /* Qmail queue's exit status */

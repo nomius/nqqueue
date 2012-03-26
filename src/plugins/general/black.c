@@ -47,9 +47,9 @@ char *plugin_version()
 	return strdup(PLUGIN_VERSION);
 }
 
-struct ModReturn *plugin_init(char *params, const char *mail, const char *From, const union Tos Rcpt, struct RSStruct *general, struct RSStruct *peruser)
+ModReturn *plugin_init(char *params, const char *mail, const char *From, const Destinations Rcpt, RSStruct *general, RSStruct *peruser)
 {
-	struct ModReturn *ret = malloc(sizeof(struct ModReturn));
+	ModReturn *ret = malloc(sizeof(ModReturn));
 
 	ret->NewFile = NULL;
 	if (strcmp(From, "") && !strcmp(params, From)) {

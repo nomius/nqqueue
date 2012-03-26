@@ -1,4 +1,4 @@
-sbin_PROGRAMS = NQqueue
+bin_PROGRAMS = NQqueue
 
 NQqueue_SOURCES = general.c cfg.c delivery.c nqqueue.c
 AM_CFLAGS = -rdynamic -DPLUGINS_LOCATION=\"$(libdir)/nqqueue/plugins\"

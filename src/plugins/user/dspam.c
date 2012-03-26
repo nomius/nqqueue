@@ -93,20 +93,21 @@ int is_dspam(char *spambuf, int *InHeaders)
 	return isSpam;
 }
 
-struct ModReturn *plugin_init(char *params, char *mail, const char *From, const union Tos Rcpt, struct RSStruct *general, struct RSStruct *peruser)
+ModReturn *plugin_init(char *params, char *mail, const char *From, const Destinations Rcpt, RSStruct *general, RSStruct *peruser)
 {
 	int pid, rmstat, n, fd, orig_fd;
 	int pim[2];
 	int InHeaders = 1;
 	int isdspam = 0;
 	char *dspam_args[] = { "dspam", "--stdout", "--deliver=innocent,spam", "--user", GLOBAL_USER, NULL };
-	char *mesg = strdup(mail);
-	char *new_mesg = NewNameRename(strdup(mail));
-	struct ModReturn *ret = malloc(sizeof(struct ModReturn));
+	char new_mesg[PATH_MAX_NQQUEUE];
+	ModReturn *ret = NULL;
 	char buffer[BUFF_SIZE];
 
-	if ((orig_fd = open(mesg, O_RDONLY, 0644)) == -1) {
-		debug(3, "nqqueue: error (%d) opening orig file %s in rw mode\n", errno, mesg);
+   	NewNameRename(mail, new_mesg);
+
+	if ((orig_fd = open(mail, O_RDONLY, 0644)) == -1) {
+		debug(3, "nqqueue: error (%d) opening orig file %s in rw mode\n", errno, mail);
 		return NULL;
 	}
 
@@ -115,9 +116,6 @@ struct ModReturn *plugin_init(char *params, char *mail, const char *From, const 
     if (pipe(pim) != 0) {
 		debug(3, "nqqueue: error (%d) generating pipes\n", errno);
 		close(orig_fd);
-		free(new_mesg);
-		free(mesg);
-		free(ret);
 		return NULL;
     }
 
@@ -128,10 +126,7 @@ struct ModReturn *plugin_init(char *params, char *mail, const char *From, const 
 			close(pim[0]);
 			close(pim[1]);
 			close(orig_fd);
-			free(new_mesg);
-			free(mesg);
-			free(ret);
-			return NULL;
+			_exit(-1);
 		case 0:
 			close(pim[0]);
 			dup2(pim[1], 1);
@@ -163,9 +158,6 @@ struct ModReturn *plugin_init(char *params, char *mail, const char *From, const 
 	if (waitpid(pid, &rmstat, 0) == -1) {
 		debug(3, "nqqueue: error (%d) waiting for dspam to end\n", errno);
 		unlink(new_mesg);
-		free(new_mesg);
-		free(mesg);
-		free(ret);
 		return NULL;
 	}
 
@@ -173,9 +165,6 @@ struct ModReturn *plugin_init(char *params, char *mail, const char *From, const 
 	if (WIFSIGNALED(rmstat)) {
 		debug(3, "nqqueue: error (%d) dspam received a signal and died\n", errno);
 		unlink(new_mesg);
-		free(new_mesg);
-		free(mesg);
-		free(ret);
 		return NULL;
 	}
 
@@ -183,16 +172,15 @@ struct ModReturn *plugin_init(char *params, char *mail, const char *From, const 
 	if (WEXITSTATUS(rmstat) != 0) {
 		debug(3, "nqqueue: error (%d) dspam endded with error: %d\n", errno, WEXITSTATUS(rmstat));
 		unlink(new_mesg);
-		free(new_mesg);
-		free(mesg);
-		free(ret);
 		return NULL;
 	}
 
 	/* Final issues: Point file to the new file and set to reject or not */
-	unlink(mesg);
-	free(mesg);
-	ret->NewFile = new_mesg;
+   	if (!(ret= calloc(1, sizeof(ModReturn))))
+		return NULL;
+
+	unlink(mail);
+	ret->NewFile = strdup(new_mesg);
 	ret->ret = isdspam;
 	if (params != NULL && !strcmp(params, "pass")) {
 		ret->rejected = 0;

@@ -28,6 +28,6 @@
  * POSSIBILITY OF SUCH DAMAGE.
 */
 
-void delivery(char *To, char *File, struct RSStruct *local_runned_scanners, int PerUserScanners);
+void delivery(char *To, char *File, RSStruct *local_runned_scanners, int PerUserScanners);
 void deliveryAll(char *File);
 

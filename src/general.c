@@ -86,8 +86,6 @@ void exit_clean(int error_code)
 {
 	debug(1, "nqqueue: exit with error code: %d\n", error_code);
 	remove_files(indexdir);
-	if (indexdir)
-		free(indexdir);
 	_exit(error_code);
 }
 
@@ -96,7 +94,7 @@ void exit_clean(int error_code)
  */
 void copy(char *from, char *to)
 {
-	char buffer[SMALL_BUFF];
+	char buffer[BIG_BUFF];
 	int fdfrom, fdto, red;
 
 	fdfrom = open(from, O_RDONLY);
@@ -165,28 +163,32 @@ int fd_copy(int to, int from)
  */
 int IsLocal(const char *email)
 {
-	char *domain;
-	FILE *rcpthosts;
-	char *buffer = calloc(SMALL_BUFF, sizeof(char));
-	int ret = 0;
+	char *domain = NULL, buffer[MINI_BUFF];
+	int ret = 0, ldomain = 0;
+	FILE *rcpthosts = NULL;
 
-	if(email == NULL || !strcmp(email, ""))
+	if(email == NULL || *email == '\0')
 		return 0;
-	domain = index(email, '@') + 1;
-	sprintf(buffer, "%s/rcpthosts", CONTROLDIR);
+	if ((domain = index(email, '@')))
+		domain += 1;
+	else
+		return 1;
+
+	if (!(ldomain = strlen(domain)))
+		return 0;
+
+	snprintf(buffer, MINI_BUFF, "%s/rcpthosts", CONTROLDIR);
 	if ((rcpthosts = fopen(buffer, "r")) == NULL) {
 		debug(3, "nqqueue: error (%d) opening %s file\n", errno, buffer);
 		exit_clean(EXIT_400);
 	}
-	while (fgets(buffer, SMALL_BUFF, rcpthosts) != NULL) {
-		buffer[strlen(buffer) - 1] = 0;
-		if (!strcasecmp(domain, buffer)) {
+	while (fgets(buffer, MINI_BUFF, rcpthosts)) {
+		if (!strncasecmp(domain, buffer, ldomain)) {
 			ret = 1;
 			break;
 		}
 	}
 	fclose(rcpthosts);
-	free(buffer);
 	return ret;
 }
 
@@ -284,13 +286,12 @@ int remove_files(char *dir)
  * If something+number is given, then something+(number+1) is returned.
  * Otherwise, something+0 is returned
  */
-char *NewNameRename(char *Init)
+void NewNameRename(char *Init, char *Dest)
 {
 	int i, next = 0;
-	char *buffer = calloc(strlen(Init) + 3, sizeof(char));
 
-	if (Init == NULL)
-		return NULL;
+	if (Init == NULL || !*Init)
+		return;
 
 	for (i = strlen(Init) - 1; i > 0; i--)
 		if (Init[i] == '+') {
@@ -298,19 +299,18 @@ char *NewNameRename(char *Init)
 			Init[i] = 0;
 			break;
 		}
-	sprintf(buffer, "%s+%d", Init, next);
-	free(Init);
-	return buffer;
+	sprintf(Dest, "%s+%d", Init, next);
 }
 
 /*
  * Convert a string to lower
  */
-char *strlower(char *ooops){
+void strlower(char *up, char *down){
 	int i = 0;
 
-	while (*(ooops+i) != 0)
-		*(ooops+i) = tolower(*(ooops+i)), i++;
-	return ooops;
+	while (*(up+i)) {
+		*(down+i) = tolower(*(up+i));
+	   	i++;
+	}
 }
 

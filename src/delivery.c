@@ -44,7 +44,7 @@
 /* 
  * Delivery a mail to a local user to qmail-queue
  */
-void delivery(char *To, char *File, struct RSStruct *local_runned_scanners, int PerUserScanners)
+void delivery(char *To, char *File, RSStruct *local_runned_scanners, int PerUserScanners)
 {
 	int fd;
 	int ret;
@@ -96,14 +96,14 @@ void delivery(char *To, char *File, struct RSStruct *local_runned_scanners, int 
 
 	/* print received line */
 	utime = SECS(stop) - SECS(start);
-	snprintf(buffer, sizeof(buffer), "Received: by nqqueue (%s) ppid: %d, pid: %d, time: %3.4f secs., scanners:\n", VERSION, getppid(), getpid(), utime);
+	snprintf(buffer, sizeof(buffer), "Received: by nqqueue (%s) ppid: %d, pid: %d, time: %3.4f s., scanners:\n", VERSION, getppid(), getpid(), utime);
 	if (write(pim[1], buffer, strlen(buffer)) == -1) {
 		debug(3, "nqqueue: error (%d) writing received line\n", errno);
 		exit_clean(EXIT_400);
 	}
 
 	/* print each and every general scanner runned */
-	for (ret = 0; GlobalRunnedScanners[ret].plugin_name != NULL; ret++) {
+	for (ret = 0; ret < GlobalScanners; ret++) {
 		snprintf(buffer, sizeof(buffer), "          %s (%s)\n", GlobalRunnedScanners[ret].plugin_name, GlobalRunnedScanners[ret].plugin_version);
 		if (write(pim[1], buffer, strlen(buffer)) == -1) {
 			debug(3, "nqqueue: error (%d) writing scanners\n", errno);
@@ -112,7 +112,7 @@ void delivery(char *To, char *File, struct RSStruct *local_runned_scanners, int 
 	}
 
 	/* and now the per user scanner runned and free those too */
-	for (ret = 0; local_runned_scanners[ret].plugin_name != NULL; ret++) {
+	for (ret = 0; ret < PerUserScanners; ret++) {
 		snprintf(buffer, sizeof(buffer), "          %s (%s)\n", local_runned_scanners[ret].plugin_name, local_runned_scanners[ret].plugin_version);
 		if (write(pim[1], buffer, strlen(buffer)) == -1) {
 			debug(3, "nqqueue: error (%d) writing scanners\n", errno);
@@ -139,11 +139,8 @@ void delivery(char *To, char *File, struct RSStruct *local_runned_scanners, int 
 		debug(3, "nqqueue: error (%d) writing addresses to qmail-queue\n", errno);
 	close(pie[1]);
 
-	free(To);
-
 	/* Remove the File as we will not need it anymore */
 	unlink(File);
-	free(File);
 
 	/* wait for qmail-queue to finish */
 	if (waitpid(pid, &qstat, 0) == -1) {
@@ -166,13 +163,12 @@ void deliveryAll(char *File)
 	int pim[2], pie[2];
 	int qstat = 0;
 	int count = 0;
-	int count_old = 0;
 	double utime;
 	char buffer[SMALL_BUFF];
 
 	/* re-open the file read only */
 	if ((fd = open(File, O_RDONLY)) == -1) {
-		debug(3, "nqqueue: error (%d) could not re-open message file: %s\n", errno, File);
+		debug(3, "nqqueue: error (%d) could not re-open message file: %s\n", errno);
 		exit_clean(EXIT_400);
 	}
 
@@ -218,13 +214,17 @@ void deliveryAll(char *File)
 	}
 
 	/* print each and every general scanner runned */
-	for (ret = 0; GlobalRunnedScanners[ret].plugin_name != NULL; ret++) {
+	for (ret = 0; ret < GlobalScanners; ret++) {
 		snprintf(buffer, sizeof(buffer), "          %s (%s)\n", GlobalRunnedScanners[ret].plugin_name, GlobalRunnedScanners[ret].plugin_version);
 		if (write(pim[1], buffer, strlen(buffer)) == -1) {
 			debug(3, "nqqueue: error (%d) writing scanners\n", errno);
 			exit_clean(EXIT_400);
 		}
+		free(GlobalRunnedScanners[ret].plugin_name);
+		free(GlobalRunnedScanners[ret].plugin_params);
+		free(GlobalRunnedScanners[ret].plugin_version);
 	}
+	free(GlobalRunnedScanners);
 
 	/* write the message to qmail-queue */
 	while ((ret = read(fd, buffer, sizeof(buffer))) > 0) {
@@ -232,7 +232,6 @@ void deliveryAll(char *File)
 			debug(3, "nqqueue: error (%d) writing msg to qmail-queue\n", errno);
 			exit_clean(EXIT_400);
 		}
-		memset(buffer, 0, ret);
 	}
 	close(pim[1]);
 	close(fd);
@@ -244,12 +243,11 @@ void deliveryAll(char *File)
 	write(pie[1], buffer, count);
 	memset(buffer, 0, count);
 	for (ret = 0; ret < RcptTotal; ret++) {
-		if (RcptTo[ret].Index == (pthread_t)-1) {
+		if (RcptTo[ret].deliver) {
 			count = strlen(RcptTo[ret].To) + 2;
 			sprintf(buffer, "T%s%c", RcptTo[ret].To, 0);
 			write(pie[1], buffer, count);
 			memset(buffer, 0, count);
-			free(RcptTo[ret].To);
 		}
 	}
 	sprintf(buffer, "%c", 0);
@@ -261,8 +259,6 @@ void deliveryAll(char *File)
 		debug(3, "nqqueue: error (%d) forking qmail-queue\n", errno);
 		exit_clean(EXIT_400);
 	}
-
-	free(File);
 
 	/* hand the email to the qmail-queue */
 	debug(2, "nqqueue: qmail-queue exited with exit value: %d\n", WEXITSTATUS(qstat));
