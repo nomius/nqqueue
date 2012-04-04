@@ -29,7 +29,7 @@ libexec_PROGRAMS = vquad
 vquad_CFLAGS  = $(VPOPMAIL_CFLAGS) -DHAVE_VPOPMAIL
 vquad_LDFLAGS = -lcrypt $(VPOPMAIL_LIBS)
 end_vquad:
-	@test `shell id -u` -eq 0 && chown root:$(NOFILESGID) $(DESTDIR)$(libexecdir)/vquad && chmod 4700 $(DESTDIR)$(libexecdir)/vquad || echo -e "\n..........................................................................\n.                                                                        .\n. Remember to excecute chmod u+s $(DESTDIR)$(libexec)/vquad as root .\n.                                                                        .\n..........................................................................\n"
+	@test `id -u` -eq 0 && chown root:$(NOFILESGID) $(DESTDIR)$(libexecdir)/vquad && chmod 4700 $(DESTDIR)$(libexecdir)/vquad || echo -e "\n..........................................................................\n.                                                                        .\n. Remember to excecute chmod u+s $(DESTDIR)$(libexec)/vquad as root .\n.                                                                        .\n..........................................................................\n"
 else
 end_vquad:
 endif
