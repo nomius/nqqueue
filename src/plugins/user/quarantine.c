@@ -205,7 +205,10 @@ ModReturn *plugin_init(char *params, char *mail, const char *From, const Destina
 			/* Now make the copy of the file in the quarantine */
 			memset(buffer, 0, sizeof(buffer));
 			while ((file_count = read(orig_fd, buffer, BUFF_SIZE)) > 0) {
-				write(dst_fd, buffer, file_count);
+				if(write(dst_fd, buffer, file_count) < 0) {
+					debug(5, "Wooooooo: write failed in quarantine [%s:%d]\n", __FILE__, __LINE__);
+					_exit(-1);
+				}
 				memset(buffer, 0, sizeof(buffer));
 			}
 
@@ -227,7 +230,7 @@ ModReturn *plugin_init(char *params, char *mail, const char *From, const Destina
 			vquad_args[0] = VQUAD;
 			vquad_args[1] = Rcpt.rcpt;
 			vquad_args[2] = vdir;
-			sprintf((char *)&str_st_size, "%d", st.st_size);
+			sprintf((char *)&str_st_size, "%ld", (unsigned long int)st.st_size);
 			vquad_args[3] = str_st_size;
 			vquad_args[4] = NULL;
 
