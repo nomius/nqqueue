@@ -75,9 +75,11 @@ void *RunPerUserScannersAndDelivery(void *Data)
 	void *mod_handler = NULL;
 	PluginsConf *conf_array = NULL;
 	ModReturn *returned = NULL;
-	RSStruct *PerUserRunnedScanners = NULL;
+	RSStruct *PerUserRunnedScanners = malloc(sizeof(RSStruct));
 	Destinations tmp;
 	PUStruct *me = (PUStruct *)Data;
+
+	PerUserRunnedScanners[0].plugin_name == NULL;
 
 	/* Get the domain name of this destination */
 	if ((domain = index(me->To, '@')))
@@ -320,8 +322,10 @@ int main(int argc, char *argv[])
 
 	/* Before anything, initialize counters pointers and the return value */
 	qstat = RcptTotal = LocalRcpt = RemoteRcpt = GlobalScanners = 0;
-	GlobalRunnedScanners = NULL;
+	GlobalRunnedScanners = malloc(sizeof(RSStruct));
 	RcptTo = NULL;
+
+	GlobalRunnedScanners[0].plugin_name == NULL;
 
 #ifdef HAS_ULIMIT_NPROC
 	/* Set ulimits to prevent hangs if it forks too many processes */
