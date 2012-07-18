@@ -1,6 +1,6 @@
 dnl vim: set sw=8 sts=8 noet :
 
-AC_INIT([NQqueue], [0.3])
+AC_INIT([NQqueue], [0.3.2])
 AC_PREREQ(2.5)
 AM_INIT_AUTOMAKE(1.9)
 AM_PROG_LIBTOOL
