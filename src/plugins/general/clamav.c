@@ -115,7 +115,7 @@ ModReturn *plugin_init(char *params, const char *mail, const char *From, const D
 	int pim[2];
 	int InHeaders = 1, isclamav = 0;
 	char *clamav_args[] = { "clamdscan", "--stdout", "-", NULL };
-	ModReturn *ret = malloc(sizeof(ModReturn));
+	ModReturn *ret = NULL;
 	char buffer[BUFF_SIZE];
 
 	if ((fd = open(mail, O_RDONLY, 0644)) == -1) {
@@ -181,6 +181,9 @@ ModReturn *plugin_init(char *params, const char *mail, const char *From, const D
 	}
 
 	/* Final issues: Point file to the new file and set to reject or not */
+	if (!(ret= calloc(1, sizeof(ModReturn))))
+		return NULL;
+
 	ret->NewFile = NULL;
     ret->ret = isclamav;
 	if (params != NULL && !strcmp(params, "pass")) {
