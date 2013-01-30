@@ -248,7 +248,7 @@ void RunGeneralScanners(char *OutputFile)
 				/* Send the rejected message back to qmail if any */
 				if (returned->message) {
 					snprintf(mod, 255 + 15 + sizeof(PLUGINS_LOCATION), "D%s", returned->message);
-					write(4, mod, strlen(mod));
+					ret = write(4, mod, strlen(mod));
 					free(returned->message);
 				}
 				ret = 1;
@@ -260,16 +260,15 @@ void RunGeneralScanners(char *OutputFile)
 
 				/* Register this new scanner */
 				GlobalRunnedScanners = realloc(GlobalRunnedScanners, sizeof(RSStruct) * (GlobalScanners + 2));
-				GlobalRunnedScanners[GlobalScanners - 1].plugin_name = strdup(mod_name);
-				GlobalRunnedScanners[GlobalScanners - 1].plugin_version = strdup(mod_version);
+				GlobalRunnedScanners[GlobalScanners].plugin_name = strdup(mod_name);
+				GlobalRunnedScanners[GlobalScanners].plugin_version = strdup(mod_version);
 				if (conf_array[i].plugin_params)
-					GlobalRunnedScanners[GlobalScanners - 1].plugin_params = strdup(conf_array[i].plugin_params);
-				GlobalRunnedScanners[GlobalScanners - 1].returned = returned->ret;
+					GlobalRunnedScanners[GlobalScanners].plugin_params = strdup(conf_array[i].plugin_params);
+				GlobalRunnedScanners[GlobalScanners].returned = returned->ret;
 
-				/* Point the next one to NULL to say this is the last one for now */
-				GlobalRunnedScanners[GlobalScanners].plugin_name = NULL;
 				GlobalScanners += 1;
 
+				/* Point the next one to NULL to say this is the last one for now */
 				memset(GlobalRunnedScanners+GlobalScanners, '\0', sizeof(RSStruct));
 
 				if (returned->NewFile) {
