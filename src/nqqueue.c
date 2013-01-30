@@ -92,7 +92,7 @@ void *RunPerUserScannersAndDelivery(void *Data)
 	tmp.rcpt = me->To;
 
 	/* Initialize the configuration file name using the general rules */
-	if (!InitConf(domain, "nqqueue", 0, config_file)) {
+	if (!InitConf(domain, "nqqueue", 1, config_file)) {
 
 		/* Load the configuration strings array */
 		conf_array = Str2Conf(config_file, me->To, &nPlugins);
@@ -194,7 +194,7 @@ void RunGeneralScanners(char *OutputFile)
 	Destinations tmp;
 
 	/* Initialize the configuration file name using the general rules */
-	if (InitConf(NULL, "general", 0, config_file)) {
+	if (InitConf(NULL, "general", 1, config_file)) {
 		snprintf(OutputFile, PATH_MAX_NQQUEUE, "%s", MESSAGE_FILE);
 		return;
 	}
@@ -281,8 +281,8 @@ void RunGeneralScanners(char *OutputFile)
 		}
 
 		/* Since we have it already registered, free that memory */
-		free(mod_name);
-		free(mod_version);
+		free(mod_name); mod_name = NULL;
+		free(mod_version); mod_version = NULL;
 
 		/* Free this element in the conf array since it was already runned */
 		free(conf_array[i].plugin_name);
